@@ -5,23 +5,27 @@ import org.apache.spark.mllib.classification.{NaiveBayes, NaiveBayesModel}
 import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{DataFrame, SQLContext}
+import org.apache.spark.sql.Row.fromSeq
+import org.apache.spark.sql.types.{StructType, StringType, StructField}
+import org.apache.spark.sql.{Row, DataFrame, SQLContext}
 import org.apache.spark.{SparkConf, SparkContext}
 
 
 object CategoryPrediction {
 
-  val TRAIN_PATH = "src/main/resources/train.csv"
+  val TRAIN_PATH = "data/in/train.csv"
 
-  val TEST_PATH = "src/main/resources/test.csv"
+  val TEST_PATH = "data/in/test.csv"
 
-  val RESULT_PATH ="src/main/resources/results3.csv"
+  val RESULT_PATH ="data/out"
 
-  val conf = new SparkConf().setAppName("CategoryPrediction").setMaster("local")
+  val conf = new SparkConf().setAppName("CategoryPrediction").setMaster("local[4]")
 
   val sc = new SparkContext(conf)
 
   def main(args: Array[String]) {
+
+
 
     val trainDF = loadAndParseData(TRAIN_PATH, isTrain = true)
     val indexedTrainDF = indexedCategory(trainDF, indexedFeatures(trainDF))
@@ -31,11 +35,14 @@ object CategoryPrediction {
     val indexedTestDF = indexedFeatures(testDF)
     val result: RDD[Vector] = predict(model, indexedTestDF)
 
-    val toWrite: RDD[String] = processToWrite(result)
+    val map: RDD[Row] = result.map(line => fromSeq(line.toArray.map(d => "%.3f".format(d))))
     val sqlContext = new SQLContext(sc)
-    import sqlContext.implicits._
-    val resultDF = toWrite.toDF()
-    resultDF.repartition(1)
+
+    val cols : Seq[StructField] = (0 until map.first().size).map(i => StructField("c" + i, StringType, nullable = false))
+    val dataFrame: DataFrame = sqlContext.createDataFrame(map, StructType(cols))
+
+
+    dataFrame.repartition(1)
             .write.format("com.databricks.spark.csv")
             .option("header", "false")
             .save(RESULT_PATH)
@@ -102,23 +109,6 @@ object CategoryPrediction {
 
     val testSet: RDD[Vector] = indexedTestData.map(line => Vectors.dense(line(7).asInstanceOf[Double], line(8).asInstanceOf[Double]))
     model.predictProbabilities(testSet)
-  }
-
-  def processToWrite(result : RDD[Vector]) : RDD[String] ={
-
-    val parser = new CSVParser(',')
-    result.map(line => getLine(line))
-  }
-
-  def getLine(line: Vector) : String = {
-
-    var result = ""
-    for(index <- 0 until line.size-1){
-
-      result = result + line(index) +","
-    }
-
-    result.substring(0, result.length()- 2)
   }
 
   case class Crime(date: String, category: String, descript: String, dayOfWeek: String, pdDistrict: String, resolution: String, address: String, x: Double, y: Double)
