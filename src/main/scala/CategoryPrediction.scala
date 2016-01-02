@@ -6,7 +6,7 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.Row.fromSeq
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
-import org.apache.spark.sql.{DataFrame, Row, SQLContext}
+import org.apache.spark.sql.{Column, DataFrame, Row, SQLContext}
 import org.apache.spark.{SparkConf, SparkContext}
 
 
@@ -39,8 +39,9 @@ object CategoryPrediction {
     val cols: Seq[StructField] = StructField("Id", StringType, nullable = false) +:
       (0 until resultRows.first().size - 1).map(i => StructField(categoryIndexer.labels(i), StringType, nullable = false))
     val dataFrame: DataFrame = sqlContext.createDataFrame(resultRows, StructType(cols))
+    val sortedColumns: Array[Column] = categoryIndexer.labels.sorted.map(c => dataFrame(c))
 
-    dataFrame.repartition(1)
+    dataFrame.select(dataFrame("Id") +: sortedColumns: _*).coalesce(1)
       .write.format("com.databricks.spark.csv")
       .option("header", "true")
       .save(RESULT_PATH)
